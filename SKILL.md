@@ -13,11 +13,12 @@ Self-contained Python 3, stdlib only. Run directly:
 
 ```bash
 python3 ~/.claude/skills/sync-skills/scripts/install.py <name> <owner/repo> <path> [ref]
+python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
 ```
 
-Registers a skill, seeds all three trees from upstream, creates the symlink, and appends an audit event.
+`install` registers a skill, seeds all three trees from upstream, creates the symlink, and appends an audit event. `accept` advances the baseline (`baseline := upstream`) — the primitive behind cherry-pick, wholesale, and skip in `/sync-skills`.
 
-More scripts (`accept`, `migrate`, `relink`, `doctor`) and the interactive `/sync-skills` review flow land in follow-up issues. Trivial operations (list, fetch, diff, remove) are inline `Bash` calls in this file once the review flow lands.
+More scripts (`migrate`, `relink`, `doctor`) and the interactive `/sync-skills` review flow land in follow-up issues. Trivial operations (list, fetch, diff, remove) are inline `Bash` calls in this file once the review flow lands.
 
 ## Inspecting state
 
