@@ -1,33 +1,36 @@
+"""Register a skill, seed active/baseline/upstream from upstream, create the
+~/.claude/skills/<name> symlink, append an audit event."""
+
 import argparse
 import sys
 
-from .lib import audit, fetcher, layout, registry
+import core
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="install.py")
     parser.add_argument("name")
-    parser.add_argument("repo")
-    parser.add_argument("path")
+    parser.add_argument("repo", help="owner/repo or any URL/path git can clone")
+    parser.add_argument("path", help="subdirectory inside the repo where the skill lives, or '.' for repo root")
     parser.add_argument("ref", nargs="?", default="HEAD")
     args = parser.parse_args(argv)
 
-    if registry.get(args.name) is not None:
+    if core.registry_get(args.name) is not None:
         print(f"error: {args.name} already registered", file=sys.stderr)
         return 2
 
-    paths = layout.paths_for(args.name)
-    with fetcher.fetch(args.repo, args.path, args.ref) as src:
+    paths = core.paths_for(args.name)
+    with core.fetch(args.repo, args.path, args.ref) as src:
         for dst in (paths.active, paths.baseline, paths.upstream):
-            layout.copy_tree(src, dst)
+            core.copy_tree(src, dst)
 
     paths.symlink.parent.mkdir(parents=True, exist_ok=True)
     if paths.symlink.is_symlink() or paths.symlink.exists():
         paths.symlink.unlink()
     paths.symlink.symlink_to(paths.active)
 
-    registry.set(args.name, args.repo, args.path, args.ref)
-    audit.append("install", args.name)
+    core.registry_set(args.name, args.repo, args.path, args.ref)
+    core.audit_append("install", args.name)
     return 0
 
 

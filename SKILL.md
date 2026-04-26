@@ -9,10 +9,22 @@ Maintain a personal fork of an upstream Claude skill. State lives under `~/.agen
 
 ## Bundled scripts
 
-Run with `python3` (stdlib only). From within the skill folder:
+Self-contained Python 3, stdlib only. Run directly:
 
-- `python3 scripts/install.py <name> <owner/repo> <path> [ref]` — register a skill, seed all three trees from upstream, and create the symlink.
-- `python3 scripts/list.py` — show all registered skills.
-- `python3 scripts/paths.py <name>` — print the active / baseline / upstream / symlink paths for a skill.
+```bash
+python3 ~/.claude/skills/sync-skills/scripts/install.py <name> <owner/repo> <path> [ref]
+```
 
-More subcommands (`fetch`, `diff`, `accept`, `migrate`, `remove`, `relink-all`, `doctor`) and the interactive `/sync-skills` review flow land in follow-up issues.
+Registers a skill, seeds all three trees from upstream, creates the symlink, and appends an audit event.
+
+More scripts (`accept`, `migrate`, `relink`, `doctor`) and the interactive `/sync-skills` review flow land in follow-up issues. Trivial operations (list, fetch, diff, remove) are inline `Bash` calls in this file once the review flow lands.
+
+## Inspecting state
+
+Until `/sync-skills` lands, you can inspect things directly:
+
+```bash
+cat ~/.agents/sync-skills/sources.json | jq               # registered skills
+ls ~/.agents/sync-skills/<name>/                          # the three trees
+tail ~/.agents/sync-skills/history.log                    # audit
+```
