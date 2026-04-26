@@ -4,3 +4,8 @@
 .vscode/
 .idea/
 node_modules/
+.claude/
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
