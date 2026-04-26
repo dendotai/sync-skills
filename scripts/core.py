@@ -99,6 +99,53 @@ def paths_for(name: str) -> Paths:
     )
 
 
+def _npx_skill_dir(name: str) -> Path:
+    return Path(os.environ["HOME"]) / ".agents" / "skills" / name
+
+
+def is_clobbered(name: str) -> bool:
+    """True if ~/.claude/skills/<name> symlinks into ~/.agents/skills/<name>."""
+    link = paths_for(name).symlink
+    if not link.is_symlink():
+        return False
+    try:
+        return link.resolve() == _npx_skill_dir(name).resolve()
+    except OSError:
+        return False
+
+
+def _lock_path() -> Path:
+    return Path(os.environ["HOME"]) / ".agents" / ".skill-lock.json"
+
+
+def lock_load() -> dict:
+    p = _lock_path()
+    if not p.exists():
+        return {"version": 3, "skills": {}}
+    return json.loads(p.read_text())
+
+
+def migration_candidates() -> list[str]:
+    """Lock-file skills with an active npx-style symlink and no sources.json entry."""
+    registered = set(registry_load().keys())
+    out: list[str] = []
+    for name in lock_load().get("skills", {}):
+        if name in registered:
+            continue
+        if is_clobbered(name):
+            out.append(name)
+    return sorted(out)
+
+
+def has_stranded_edit(name: str) -> bool:
+    """True if ~/.agents/skills/<name>/SKILL.md differs from active/SKILL.md."""
+    npx = _npx_skill_dir(name) / "SKILL.md"
+    active = paths_for(name).active / "SKILL.md"
+    if not (npx.is_file() and active.is_file()):
+        return False
+    return npx.read_bytes() != active.read_bytes()
+
+
 def copy_tree(src: Path, dst: Path) -> None:
     if dst.exists():
         shutil.rmtree(dst)

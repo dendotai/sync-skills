@@ -20,19 +20,10 @@ def _npx_dir(name: str) -> Path:
     return Path(os.environ["HOME"]) / ".agents" / "skills" / name
 
 
-def _lock_path() -> Path:
-    return Path(os.environ["HOME"]) / ".agents" / ".skill-lock.json"
-
-
-def _lock_load() -> dict:
-    p = _lock_path()
-    if not p.exists():
-        return {"version": 3, "skills": {}}
-    return json.loads(p.read_text())
-
-
 def _lock_save(data: dict) -> None:
-    _lock_path().write_text(json.dumps(data, indent=2) + "\n")
+    (Path(os.environ["HOME"]) / ".agents" / ".skill-lock.json").write_text(
+        json.dumps(data, indent=2) + "\n"
+    )
 
 
 @dataclass
@@ -65,15 +56,6 @@ def _import_stranded_edit(name: str) -> Callable[[], None]:
     return apply
 
 
-def _points_into_npx(symlink: Path, name: str) -> bool:
-    if not symlink.is_symlink():
-        return False
-    try:
-        return symlink.resolve() == _npx_dir(name).resolve()
-    except OSError:
-        return False
-
-
 def _check_symlinks() -> list[Issue]:
     issues: list[Issue] = []
     for name in core.registry_load():
@@ -85,7 +67,7 @@ def _check_symlinks() -> list[Issue]:
         if paths.symlink.exists() and not paths.symlink.is_symlink():
             continue
 
-        if _points_into_npx(paths.symlink, name):
+        if core.is_clobbered(name):
             issues.append(
                 Issue(
                     kind="symlink-clobber",
@@ -94,13 +76,7 @@ def _check_symlinks() -> list[Issue]:
                     apply=_fix_symlink(name),
                 )
             )
-            npx_skill = _npx_dir(name) / "SKILL.md"
-            active_skill = paths.active / "SKILL.md"
-            if (
-                npx_skill.is_file()
-                and active_skill.is_file()
-                and npx_skill.read_bytes() != active_skill.read_bytes()
-            ):
+            if core.has_stranded_edit(name):
                 issues.append(
                     Issue(
                         kind="stranded-edit",
@@ -178,7 +154,7 @@ def _check_folder_orphans() -> list[Issue]:
 
 def _drop_lock_entry(name: str) -> Callable[[], None]:
     def apply() -> None:
-        lock = _lock_load()
+        lock = core.lock_load()
         if lock.get("skills", {}).pop(name, None) is not None:
             _lock_save(lock)
         core.audit_append("doctor-fix", name)
@@ -188,7 +164,7 @@ def _drop_lock_entry(name: str) -> Callable[[], None]:
 
 def _check_double_managed() -> list[Issue]:
     issues: list[Issue] = []
-    locked = set(_lock_load().get("skills", {}).keys())
+    locked = set(core.lock_load().get("skills", {}).keys())
     for name in core.registry_load():
         if name in locked:
             issues.append(
