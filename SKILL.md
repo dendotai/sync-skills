@@ -14,11 +14,12 @@ Self-contained Python 3, stdlib only. Run directly:
 ```bash
 python3 ~/.claude/skills/sync-skills/scripts/install.py <name> <owner/repo> <path> [ref]
 python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
+python3 ~/.claude/skills/sync-skills/scripts/migrate.py [name]
 ```
 
-`install` registers a skill, seeds all three trees from upstream, creates the symlink, and appends an audit event. `accept` advances the baseline (`baseline := upstream`) — the primitive behind cherry-pick, wholesale, and skip in `/sync-skills`.
+`install` registers a skill, seeds all three trees from upstream, creates the symlink, and appends an audit event. `accept` advances the baseline (`baseline := upstream`) — the primitive behind cherry-pick, wholesale, and skip in `/sync-skills`. `migrate` ports a skill installed via `npx skills` (vercel-labs/skills) into sync-skills: copies `~/.agents/skills/<name>/` into all three trees, swings the symlink, registers it, and removes the entry from `~/.agents/.skill-lock.json`. With no name, migrates every entry in the lock file.
 
-More scripts (`migrate`, `relink`, `doctor`) and the interactive `/sync-skills` review flow land in follow-up issues. Trivial operations (list, fetch, diff, remove) are inline `Bash` calls in this file once the review flow lands.
+More scripts (`relink`, `doctor`) and the interactive `/sync-skills` review flow land in follow-up issues. Trivial operations (list, fetch, diff, remove) are inline `Bash` calls in this file once the review flow lands.
 
 ## Inspecting state
 
