@@ -21,6 +21,8 @@ python3 ~/.claude/skills/sync-skills/scripts/doctor.py [--yes]
 
 `install` registers a skill, seeds all three trees from upstream, creates the symlink, and appends an audit event. `accept` advances the baseline (`baseline := upstream`) — the primitive behind cherry-pick, wholesale, and skip in `/sync-skills`. `migrate` ports a skill installed via `npx skills` (vercel-labs/skills) into sync-skills: copies `~/.agents/skills/<name>/` into all three trees, swings the symlink, registers it, and removes the entry from `~/.agents/.skill-lock.json`. With no name, migrates every entry in the lock file. `relink` recreates every `~/.claude/skills/<name>` symlink from `sources.json` — the cross-machine restore: drop a saved `~/.agents/sync-skills/` folder onto a fresh machine, run `relink`, all symlinks come back. Idempotent; refuses to overwrite a non-symlink at the target path. `doctor` scans for the six known state-drift failure modes (broken symlink, vercel clobber + stranded edits, registry orphan, folder orphan, double-managed lock entry, missing layer) and prints findings; pass `--yes` to apply every proposed fix. Each applied fix appends a `doctor-fix` audit event.
 
+> **Clobber risk.** `npx skills` rewrites `~/.claude/skills/<name>` to point into `~/.agents/skills/<name>`, silently breaking the symlink into `active/`. The `/sync-skills` pre-flight catches this; `doctor` is the standalone equivalent.
+
 ## Inspecting state
 
 ```bash
@@ -37,6 +39,36 @@ Shorthand for inline calls:
 
 ```bash
 SS='import sys; sys.path.insert(0, "'"$HOME"'/.claude/skills/sync-skills/scripts"); import core'
+```
+
+### 0. Pre-flight (run before fetching)
+
+Surface drift before the user reviews changes against a broken setup.
+
+**a. First-run hint.** If `core.registry_load()` is empty AND `core.migration_candidates()` is empty, print:
+
+> No skills registered yet. Install one with `python3 ~/.claude/skills/sync-skills/scripts/install.py <name> <owner/repo> <path>`.
+
+…and stop.
+
+**b. Migration prompt.** If `core.migration_candidates()` is non-empty, list them and `AskUserQuestion`: `migrate-all` / `migrate-some` / `skip`. On `migrate-all`, run `migrate.py` with no args. On `migrate-some`, ask per-skill, then call `migrate.py <name>` for each chosen.
+
+**c. Clobber check + stranded-edit handling.** For each `name` where `core.is_clobbered(name)` is True:
+
+1. If `core.has_stranded_edit(name)`, `AskUserQuestion`: `import-then-relink` / `relink-only` / `defer`.
+   - `import-then-relink` — `cp ~/.agents/skills/<name>/SKILL.md ~/.agents/sync-skills/<name>/active/SKILL.md`, then re-link.
+   - `relink-only` — re-link, drop the npx-side edit.
+   - `defer` — leave it; this skill is excluded from the rest of this run.
+2. Otherwise `AskUserQuestion`: `relink` / `defer`.
+3. Re-link by running `python3 ~/.claude/skills/sync-skills/scripts/relink.py` once after the loop (idempotent across all skills).
+
+Inline check:
+
+```bash
+python3 -c "$SS
+clobbered = [n for n in core.registry_load() if core.is_clobbered(n)]
+print('\n'.join(clobbered))
+"
 ```
 
 ### 1. Fetch every registered upstream
