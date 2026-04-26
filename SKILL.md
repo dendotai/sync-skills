@@ -21,14 +21,122 @@ python3 ~/.claude/skills/sync-skills/scripts/doctor.py [--yes]
 
 `install` registers a skill, seeds all three trees from upstream, creates the symlink, and appends an audit event. `accept` advances the baseline (`baseline := upstream`) — the primitive behind cherry-pick, wholesale, and skip in `/sync-skills`. `migrate` ports a skill installed via `npx skills` (vercel-labs/skills) into sync-skills: copies `~/.agents/skills/<name>/` into all three trees, swings the symlink, registers it, and removes the entry from `~/.agents/.skill-lock.json`. With no name, migrates every entry in the lock file. `relink` recreates every `~/.claude/skills/<name>` symlink from `sources.json` — the cross-machine restore: drop a saved `~/.agents/sync-skills/` folder onto a fresh machine, run `relink`, all symlinks come back. Idempotent; refuses to overwrite a non-symlink at the target path. `doctor` scans for the six known state-drift failure modes (broken symlink, vercel clobber + stranded edits, registry orphan, folder orphan, double-managed lock entry, missing layer) and prints findings; pass `--yes` to apply every proposed fix. Each applied fix appends a `doctor-fix` audit event.
 
-The interactive `/sync-skills` review flow lands in a follow-up issue. Trivial operations (list, fetch, diff, remove) are inline `Bash` calls in this file once the review flow lands.
-
 ## Inspecting state
-
-Until `/sync-skills` lands, you can inspect things directly:
 
 ```bash
 cat ~/.agents/sync-skills/sources.json | jq               # registered skills
 ls ~/.agents/sync-skills/<name>/                          # the three trees
 tail ~/.agents/sync-skills/history.log                    # audit
 ```
+
+## /sync-skills
+
+The interactive review flow. When the user invokes `/sync-skills`, walk these steps in order. Throughout, prefer the bundled `core` helpers via `python3 -c` over hand-rolled `git`/`diff` so behaviour matches what the scripts do.
+
+Shorthand for inline calls:
+
+```bash
+SS='import sys; sys.path.insert(0, "'"$HOME"'/.claude/skills/sync-skills/scripts"); import core'
+```
+
+### 1. Fetch every registered upstream
+
+For each entry in `sources.json`, clone its `repo` at `ref` and refresh `<sync_root>/<name>/upstream/`:
+
+```bash
+python3 -c "$SS
+for name, src in core.registry_load().items():
+    p = core.paths_for(name)
+    with core.fetch(src['repo'], src['path'], src['ref']) as u:
+        core.copy_tree(u, p.upstream)
+    print(name)
+"
+```
+
+### 2. Identify `upstream-changed` skills
+
+A skill is `upstream-changed` when `baseline/` and `upstream/` differ:
+
+```bash
+python3 -c "$SS
+import filecmp
+def differs(a, b):
+    c = filecmp.dircmp(str(a), str(b))
+    if c.left_only or c.right_only or c.diff_files: return True
+    return any(differs(a/d, b/d) for d in c.common_dirs)
+for name in core.registry_load():
+    p = core.paths_for(name)
+    if differs(p.baseline, p.upstream): print(name)
+"
+```
+
+### 3. If nothing changed
+
+Tell the user "All skills are up to date." and stop.
+
+### 4. Per-skill loop
+
+For each `upstream-changed` skill, in registry order:
+
+**a. One-line summary.** Run `diff -urq ~/.agents/sync-skills/<name>/baseline ~/.agents/sync-skills/<name>/upstream` to list changed files, then describe the gist in one sentence.
+
+**b. Ask `AskUserQuestion`** with four options:
+
+- `cherry-pick` — walk the diff hunk-by-hunk, pick what to merge.
+- `wholesale` — replace `active/` with `upstream/`.
+- `skip` — keep mine, advance baseline so we stop nagging.
+- `defer` — leave it `upstream-changed`, decide later.
+
+**c. Execute the chosen path** (each path emits its named audit event; cherry-pick / wholesale / skip additionally call `accept` which emits its own).
+
+#### cherry-pick
+
+1. Capture the diff:
+   ```bash
+   diff -ur ~/.agents/sync-skills/<name>/baseline ~/.agents/sync-skills/<name>/upstream
+   ```
+2. Parse with `core.parse_hunks(diff_text)` → `list[Hunk(file, old_string, new_string)]`. `file` is the path relative to the skill root.
+3. For each hunk, `AskUserQuestion`: `include` / `exclude`. Show a short preview of `old_string` → `new_string`.
+4. Before the first `Edit` in this round, snapshot `active/SKILL.md`:
+   ```bash
+   python3 -c "$SS; core.backup_active('<name>')"
+   ```
+   (One backup per skill per round is enough; the helper overwrites any prior `.bak`.)
+5. Apply each included hunk via `Edit` against `~/.agents/sync-skills/<name>/active/<file>`, passing the hunk's `old_string` / `new_string` verbatim.
+6. Append the audit event and advance the baseline:
+   ```bash
+   python3 -c "$SS; core.audit_append('cherry-pick', '<name>')"
+   python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
+   ```
+7. **Conflict path** — if `Edit` fails because `old_string` no longer matches (the user already customised those lines), surface the failing hunk and `AskUserQuestion`:
+   - `edit-manually` — print the hunk and the absolute file path, pause until the user says they merged it.
+   - `skip-hunk` — drop just this hunk, continue with the rest.
+   - `wholesale-this-skill` — abandon cherry-pick, fall through to the wholesale path below.
+
+#### wholesale
+
+```bash
+python3 -c "$SS
+p = core.paths_for('<name>')
+core.copy_tree(p.upstream, p.active)
+core.audit_append('wholesale', '<name>')
+"
+python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
+```
+
+#### skip
+
+```bash
+python3 -c "$SS; core.audit_append('skip', '<name>')"
+python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
+```
+
+#### defer
+
+```bash
+python3 -c "$SS; core.audit_append('defer', '<name>')"
+```
+
+### 5. Final summary
+
+Print counts of `synced` (cherry-pick + wholesale), `customized` (cherry-pick rounds that excluded at least one hunk), and `deferred`. Point at `~/.agents/sync-skills/history.log` for the per-skill audit trail.
