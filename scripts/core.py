@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
@@ -20,6 +21,68 @@ class Paths(NamedTuple):
     baseline: Path
     upstream: Path
     symlink: Path
+
+
+@dataclass
+class Hunk:
+    file: str
+    old_string: str
+    new_string: str
+
+
+def parse_hunks(diff_text: str) -> list[Hunk]:
+    hunks: list[Hunk] = []
+    current_file: str | None = None
+    old: list[str] = []
+    new: list[str] = []
+    in_hunk = False
+    last_old = False
+    last_new = False
+
+    def flush() -> None:
+        if in_hunk and current_file is not None:
+            hunks.append(Hunk(current_file, "".join(old), "".join(new)))
+
+    def strip_trailing_newline(buf: list[str]) -> None:
+        if buf and buf[-1].endswith("\n"):
+            buf[-1] = buf[-1][:-1]
+
+    for line in diff_text.splitlines(keepends=True):
+        if line.startswith("+++ "):
+            flush()
+            in_hunk = False
+            path = line[4:].rstrip("\n")
+            current_file = path[2:] if path.startswith("b/") else path
+            continue
+        if line.startswith("--- "):
+            continue
+        if line.startswith("@@"):
+            flush()
+            old, new = [], []
+            in_hunk = True
+            last_old = last_new = False
+            continue
+        if not in_hunk:
+            continue
+        if line.startswith("\\"):
+            if last_old:
+                strip_trailing_newline(old)
+            if last_new:
+                strip_trailing_newline(new)
+            continue
+        if line.startswith(" "):
+            old.append(line[1:])
+            new.append(line[1:])
+            last_old = last_new = True
+        elif line.startswith("-"):
+            old.append(line[1:])
+            last_old, last_new = True, False
+        elif line.startswith("+"):
+            new.append(line[1:])
+            last_old, last_new = False, True
+
+    flush()
+    return hunks
 
 
 def root() -> Path:
@@ -40,6 +103,13 @@ def copy_tree(src: Path, dst: Path) -> None:
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
+
+
+def backup_active(name: str) -> Path:
+    src = paths_for(name).active / "SKILL.md"
+    dst = src.with_name("SKILL.md.bak")
+    shutil.copy2(src, dst)
+    return dst
 
 
 def _registry_file() -> Path:
