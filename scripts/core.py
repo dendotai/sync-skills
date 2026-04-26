@@ -2,6 +2,8 @@
 script's parent dir on sys.path (Python sets that automatically when a script
 is invoked directly; tests prepend it via conftest)."""
 
+from __future__ import annotations
+
 import json
 import os
 import shutil

@@ -1,6 +1,8 @@
 """Register a skill, seed active/baseline/upstream from upstream, create the
 ~/.claude/skills/<name> symlink, append an audit event."""
 
+from __future__ import annotations
+
 import argparse
 import sys
 

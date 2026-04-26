@@ -2,7 +2,7 @@
 name = "sync-skills"
 version = "0.0.0"
 description = "Claude skill for managing forks of upstream skills"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 
 [dependency-groups]
 dev = ["pytest>=8"]
