@@ -145,3 +145,79 @@ def test_help_lists_audit_subcommand():
     result = _run("--help")
     assert result.returncode == 0
     assert "audit" in result.stdout
+
+
+def test_fetch_all_refreshes_upstream_tree_and_emits_names(home, fake_upstream_repo):
+    repo = fake_upstream_repo("acme/skills", "skills/widget", {"SKILL.md": "v2\n"})
+    registry = home / ".agents" / "sync-skills" / "sources.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps({"widget": {"repo": repo, "path": "skills/widget", "ref": "HEAD"}})
+    )
+    upstream = home / ".agents" / "sync-skills" / "widget" / "upstream"
+    upstream.mkdir(parents=True)
+    (upstream / "STALE.md").write_text("stale\n")
+
+    result = _run("fetch-all")
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["widget"]
+    assert (upstream / "SKILL.md").read_text() == "v2\n"
+    assert not (upstream / "STALE.md").exists()
+
+
+def _seed_layered_skill(home, name, baseline_content, upstream_content):
+    base = home / ".agents" / "sync-skills" / name
+    (base / "baseline").mkdir(parents=True)
+    (base / "upstream").mkdir(parents=True)
+    (base / "baseline" / "SKILL.md").write_text(baseline_content)
+    (base / "upstream" / "SKILL.md").write_text(upstream_content)
+
+
+def test_changed_list_emits_only_skills_whose_baseline_differs_from_upstream(home):
+    _seed_registry(home, "alpha")
+    _seed_registry(home, "beta")
+    _seed_layered_skill(home, "alpha", "v1\n", "v2\n")
+    _seed_layered_skill(home, "beta", "v1\n", "v1\n")
+
+    result = _run("changed-list")
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["alpha"]
+
+
+def test_changed_list_emits_nothing_when_no_registry(home):
+    result = _run("changed-list")
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_parse_hunks_emits_json_list_from_stdin_diff():
+    diff = (
+        "--- a/SKILL.md\n"
+        "+++ b/SKILL.md\n"
+        "@@ -1,3 +1,3 @@\n"
+        " line one\n"
+        "-old middle\n"
+        "+new middle\n"
+        " line three\n"
+    )
+    result = _run("parse-hunks", input=diff)
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == [
+        {
+            "file": "SKILL.md",
+            "old_string": "line one\nold middle\nline three\n",
+            "new_string": "line one\nnew middle\nline three\n",
+        }
+    ]
+
+
+def test_backup_active_creates_bak_and_prints_path(home):
+    _seed_active_skill_md(home, "widget", "v1\n")
+
+    result = _run("backup-active", "widget")
+    assert result.returncode == 0
+
+    bak = home / ".agents" / "sync-skills" / "widget" / "active" / "SKILL.md.bak"
+    assert bak.is_file()
+    assert bak.read_text() == "v1\n"
+    assert result.stdout.strip() == str(bak)

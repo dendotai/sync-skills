@@ -152,6 +152,15 @@ def copy_tree(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst)
 
 
+def tree_differs(a: Path, b: Path) -> bool:
+    import filecmp
+
+    c = filecmp.dircmp(str(a), str(b))
+    if c.left_only or c.right_only or c.diff_files:
+        return True
+    return any(tree_differs(a / d, b / d) for d in c.common_dirs)
+
+
 def backup_active(name: str) -> Path:
     src = paths_for(name).active / "SKILL.md"
     dst = src.with_name("SKILL.md.bak")
@@ -244,6 +253,36 @@ def _cmd_stranded_edit(args: "argparse.Namespace") -> int:
     return 0 if has_stranded_edit(args.name) else 1
 
 
+def _cmd_backup_active(args: "argparse.Namespace") -> int:
+    print(backup_active(args.name))
+    return 0
+
+
+def _cmd_parse_hunks(args: "argparse.Namespace") -> int:
+    import sys
+
+    hunks = parse_hunks(sys.stdin.read())
+    print(json.dumps([h.__dict__ for h in hunks]))
+    return 0
+
+
+def _cmd_changed_list(args: "argparse.Namespace") -> int:
+    for name in registry_load():
+        p = paths_for(name)
+        if tree_differs(p.baseline, p.upstream):
+            print(name)
+    return 0
+
+
+def _cmd_fetch_all(args: "argparse.Namespace") -> int:
+    for name, src in registry_load().items():
+        p = paths_for(name)
+        with fetch(src["repo"], src["path"], src["ref"]) as u:
+            copy_tree(u, p.upstream)
+        print(name)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -279,6 +318,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_stranded.add_argument("name")
     p_stranded.set_defaults(func=_cmd_stranded_edit)
+
+    p_backup = sub.add_parser(
+        "backup-active",
+        help="Snapshot active/SKILL.md to SKILL.md.bak; print backup path.",
+    )
+    p_backup.add_argument("name")
+    p_backup.set_defaults(func=_cmd_backup_active)
+
+    p_parse = sub.add_parser(
+        "parse-hunks",
+        help="Read a unified diff on stdin; emit JSON list of {file, old_string, new_string}.",
+    )
+    p_parse.set_defaults(func=_cmd_parse_hunks)
+
+    p_changed = sub.add_parser(
+        "changed-list",
+        help="Emit names of registered skills whose baseline/ differs from upstream/.",
+    )
+    p_changed.set_defaults(func=_cmd_changed_list)
+
+    p_fetch = sub.add_parser(
+        "fetch-all",
+        help="Clone each registered upstream and refresh upstream/; emit one line per skill.",
+    )
+    p_fetch.set_defaults(func=_cmd_fetch_all)
 
     args = parser.parse_args(argv)
     return args.func(args)

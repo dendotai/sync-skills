@@ -33,12 +33,12 @@ tail ~/.agents/sync-skills/history.log                    # audit
 
 ## /sync-skills
 
-The interactive review flow. When the user invokes `/sync-skills`, walk these steps in order. Throughout, prefer the bundled `core` helpers via `python3 -c` over hand-rolled `git`/`diff` so behaviour matches what the scripts do.
+The interactive review flow. When the user invokes `/sync-skills`, walk these steps in order. Throughout, prefer the bundled `sync_skills.py` dispatcher subcommands over hand-rolled `git`/`diff` so behaviour matches what the scripts do.
 
-Shorthand for inline calls:
+Shorthand for the one remaining inline-Python call site (wholesale):
 
 ```bash
-SS='import sys; sys.path.insert(0, "'"$HOME"'/.claude/skills/sync-skills/scripts"); import core'
+SS='import sys; sys.path.insert(0, "'"$HOME"'/.claude/skills/sync-skills/scripts"); import sync_skills as core'
 ```
 
 ### 0. Pre-flight (run before fetching)
@@ -73,13 +73,7 @@ For each `name` in that list:
 For each entry in `sources.json`, clone its `repo` at `ref` and refresh `<sync_root>/<name>/upstream/`:
 
 ```bash
-python3 -c "$SS
-for name, src in core.registry_load().items():
-    p = core.paths_for(name)
-    with core.fetch(src['repo'], src['path'], src['ref']) as u:
-        core.copy_tree(u, p.upstream)
-    print(name)
-"
+python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py fetch-all
 ```
 
 ### 2. Identify `upstream-changed` skills
@@ -87,16 +81,7 @@ for name, src in core.registry_load().items():
 A skill is `upstream-changed` when `baseline/` and `upstream/` differ:
 
 ```bash
-python3 -c "$SS
-import filecmp
-def differs(a, b):
-    c = filecmp.dircmp(str(a), str(b))
-    if c.left_only or c.right_only or c.diff_files: return True
-    return any(differs(a/d, b/d) for d in c.common_dirs)
-for name in core.registry_load():
-    p = core.paths_for(name)
-    if differs(p.baseline, p.upstream): print(name)
-"
+python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py changed-list
 ```
 
 ### 3. If nothing changed
@@ -120,24 +105,24 @@ For each `upstream-changed` skill, in registry order:
 
 #### cherry-pick
 
-1. Capture the diff:
+1. Capture the diff and parse it into hunks in one shot:
    ```bash
-   diff -ur ~/.agents/sync-skills/<name>/baseline ~/.agents/sync-skills/<name>/upstream
+   diff -ur ~/.agents/sync-skills/<name>/baseline ~/.agents/sync-skills/<name>/upstream | python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py parse-hunks
    ```
-2. Parse with `core.parse_hunks(diff_text)` → `list[Hunk(file, old_string, new_string)]`. `file` is the path relative to the skill root.
-3. For each hunk, `AskUserQuestion`: `include` / `exclude`. Show a short preview of `old_string` → `new_string`.
-4. Before the first `Edit` in this round, snapshot `active/SKILL.md`:
+   Output is a JSON list of `{file, old_string, new_string}` objects. `file` is the path relative to the skill root.
+2. For each hunk, `AskUserQuestion`: `include` / `exclude`. Show a short preview of `old_string` → `new_string`.
+3. Before the first `Edit` in this round, snapshot `active/SKILL.md`:
    ```bash
-   python3 -c "$SS; core.backup_active('<name>')"
+   python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py backup-active <name>
    ```
    (One backup per skill per round is enough; the helper overwrites any prior `.bak`.)
-5. Apply each included hunk via `Edit` against `~/.agents/sync-skills/<name>/active/<file>`, passing the hunk's `old_string` / `new_string` verbatim.
-6. Append the audit event and advance the baseline:
+4. Apply each included hunk via `Edit` against `~/.agents/sync-skills/<name>/active/<file>`, passing the hunk's `old_string` / `new_string` verbatim.
+5. Append the audit event and advance the baseline:
    ```bash
    python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py audit cherry-pick <name>
    python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
    ```
-7. **Conflict path** — if `Edit` fails because `old_string` no longer matches (the user already customised those lines), surface the failing hunk and `AskUserQuestion`:
+6. **Conflict path** — if `Edit` fails because `old_string` no longer matches (the user already customised those lines), surface the failing hunk and `AskUserQuestion`:
    - `edit-manually` — print the hunk and the absolute file path, pause until the user says they merged it.
    - `skip-hunk` — drop just this hunk, continue with the rest.
    - `wholesale-this-skill` — abandon cherry-pick, fall through to the wholesale path below.
