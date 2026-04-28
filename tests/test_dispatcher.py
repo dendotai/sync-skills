@@ -221,3 +221,26 @@ def test_backup_active_creates_bak_and_prints_path(home):
     assert bak.is_file()
     assert bak.read_text() == "v1\n"
     assert result.stdout.strip() == str(bak)
+
+
+def test_wholesale_replaces_active_with_upstream_and_audits(home):
+    base = home / ".agents" / "sync-skills" / "widget"
+    (base / "active").mkdir(parents=True)
+    (base / "upstream").mkdir(parents=True)
+    (base / "active" / "SKILL.md").write_text("old\n")
+    (base / "active" / "stale.md").write_text("gone\n")
+    (base / "upstream" / "SKILL.md").write_text("new\n")
+    (base / "upstream" / "fresh.md").write_text("added\n")
+
+    result = _run("wholesale", "widget")
+    assert result.returncode == 0
+
+    assert (base / "active" / "SKILL.md").read_text() == "new\n"
+    assert (base / "active" / "fresh.md").read_text() == "added\n"
+    assert not (base / "active" / "stale.md").exists()
+
+    log = home / ".agents" / "sync-skills" / "history.log"
+    line = log.read_text().strip().splitlines()[-1]
+    _, action, skill = line.split("\t")
+    assert action == "wholesale"
+    assert skill == "widget"
