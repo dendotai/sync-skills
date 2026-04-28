@@ -137,7 +137,7 @@ For each `upstream-changed` skill, in registry order:
 5. Apply each included hunk via `Edit` against `~/.agents/sync-skills/<name>/active/<file>`, passing the hunk's `old_string` / `new_string` verbatim.
 6. Append the audit event and advance the baseline:
    ```bash
-   python3 -c "$SS; core.audit_append('cherry-pick', '<name>')"
+   python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py audit cherry-pick <name>
    python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
    ```
 7. **Conflict path** — if `Edit` fails because `old_string` no longer matches (the user already customised those lines), surface the failing hunk and `AskUserQuestion`:
@@ -159,14 +159,14 @@ python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
 #### skip
 
 ```bash
-python3 -c "$SS; core.audit_append('skip', '<name>')"
+python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py audit skip <name>
 python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
 ```
 
 #### defer
 
 ```bash
-python3 -c "$SS; core.audit_append('defer', '<name>')"
+python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py audit defer <name>
 ```
 
 ### 5. Final summary

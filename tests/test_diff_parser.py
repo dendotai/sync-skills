@@ -1,4 +1,4 @@
-from core import parse_hunks
+from sync_skills import parse_hunks
 
 
 def test_single_hunk_diff():

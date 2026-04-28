@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-import core
+import sync_skills as core
 
 
 def main(argv: list[str] | None = None) -> int:
