@@ -215,3 +215,30 @@ def fetch(repo: str, path: str, ref: str = "HEAD"):
         if not skill_dir.is_dir():
             raise FileNotFoundError(f"path {path!r} not found in {repo}")
         yield skill_dir
+
+
+def _cmd_audit(args: "argparse.Namespace") -> int:
+    audit_append(args.action, args.skill)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="sync_skills.py",
+        description="CLI dispatcher for sync-skills helpers used by /sync-skills SKILL.md.",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_audit = sub.add_parser("audit", help="Append an audit-log line.")
+    p_audit.add_argument("action")
+    p_audit.add_argument("skill")
+    p_audit.set_defaults(func=_cmd_audit)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

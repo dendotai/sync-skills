@@ -1,4 +1,4 @@
-from core import backup_active, paths_for
+from sync_skills import backup_active, paths_for
 
 
 def test_bak_created_when_absent(home):

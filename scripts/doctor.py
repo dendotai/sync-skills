@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-import core
+import sync_skills as core
 
 
 def _npx_dir(name: str) -> Path:

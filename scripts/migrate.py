@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-import core
+import sync_skills as core
 
 
 def _lock_path() -> Path:
