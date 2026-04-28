@@ -45,31 +45,28 @@ SS='import sys; sys.path.insert(0, "'"$HOME"'/.claude/skills/sync-skills/scripts
 
 Surface drift before the user reviews changes against a broken setup.
 
-**a. First-run hint.** If `core.registry_load()` is empty AND `core.migration_candidates()` is empty, print:
+**a. First-run hint.** If both `python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py registry-list` returns `{}` AND `python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py migration-candidates` is empty, print:
 
 > No skills registered yet. Install one with `python3 ~/.claude/skills/sync-skills/scripts/install.py <name> <owner/repo> <path>`.
 
 …and stop.
 
-**b. Migration prompt.** If `core.migration_candidates()` is non-empty, list them and `AskUserQuestion`: `migrate-all` / `migrate-some` / `skip`. On `migrate-all`, run `migrate.py` with no args. On `migrate-some`, ask per-skill, then call `migrate.py <name>` for each chosen.
+**b. Migration prompt.** If `python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py migration-candidates` is non-empty, list them and `AskUserQuestion`: `migrate-all` / `migrate-some` / `skip`. On `migrate-all`, run `migrate.py` with no args. On `migrate-some`, ask per-skill, then call `migrate.py <name>` for each chosen.
 
-**c. Clobber check + stranded-edit handling.** For each `name` where `core.is_clobbered(name)` is True:
+**c. Clobber check + stranded-edit handling.** Get the list of clobbered registered skills:
 
-1. If `core.has_stranded_edit(name)`, `AskUserQuestion`: `import-then-relink` / `relink-only` / `defer`.
+```bash
+python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py clobbered-list
+```
+
+For each `name` in that list:
+
+1. If `python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py stranded-edit <name>` exits 0, `AskUserQuestion`: `import-then-relink` / `relink-only` / `defer`.
    - `import-then-relink` — `cp ~/.agents/skills/<name>/SKILL.md ~/.agents/sync-skills/<name>/active/SKILL.md`, then re-link.
    - `relink-only` — re-link, drop the npx-side edit.
    - `defer` — leave it; this skill is excluded from the rest of this run.
 2. Otherwise `AskUserQuestion`: `relink` / `defer`.
 3. Re-link by running `python3 ~/.claude/skills/sync-skills/scripts/relink.py` once after the loop (idempotent across all skills).
-
-Inline check:
-
-```bash
-python3 -c "$SS
-clobbered = [n for n in core.registry_load() if core.is_clobbered(n)]
-print('\n'.join(clobbered))
-"
-```
 
 ### 1. Fetch every registered upstream
 

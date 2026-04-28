@@ -222,6 +222,28 @@ def _cmd_audit(args: "argparse.Namespace") -> int:
     return 0
 
 
+def _cmd_registry_list(args: "argparse.Namespace") -> int:
+    print(json.dumps(registry_load()))
+    return 0
+
+
+def _cmd_migration_candidates(args: "argparse.Namespace") -> int:
+    for name in migration_candidates():
+        print(name)
+    return 0
+
+
+def _cmd_clobbered_list(args: "argparse.Namespace") -> int:
+    for name in sorted(registry_load()):
+        if is_clobbered(name):
+            print(name)
+    return 0
+
+
+def _cmd_stranded_edit(args: "argparse.Namespace") -> int:
+    return 0 if has_stranded_edit(args.name) else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -235,6 +257,28 @@ def main(argv: list[str] | None = None) -> int:
     p_audit.add_argument("action")
     p_audit.add_argument("skill")
     p_audit.set_defaults(func=_cmd_audit)
+
+    p_registry_list = sub.add_parser("registry-list", help="Emit the registry as JSON.")
+    p_registry_list.set_defaults(func=_cmd_registry_list)
+
+    p_migration = sub.add_parser(
+        "migration-candidates",
+        help="Emit names of npx-managed skills not yet in the registry.",
+    )
+    p_migration.set_defaults(func=_cmd_migration_candidates)
+
+    p_clobbered = sub.add_parser(
+        "clobbered-list",
+        help="Emit names of registered skills whose Claude symlink has been clobbered.",
+    )
+    p_clobbered.set_defaults(func=_cmd_clobbered_list)
+
+    p_stranded = sub.add_parser(
+        "stranded-edit",
+        help="Exit 0 if npx-side SKILL.md differs from active/SKILL.md, 1 otherwise.",
+    )
+    p_stranded.add_argument("name")
+    p_stranded.set_defaults(func=_cmd_stranded_edit)
 
     args = parser.parse_args(argv)
     return args.func(args)
