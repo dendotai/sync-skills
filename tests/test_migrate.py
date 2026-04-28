@@ -50,7 +50,7 @@ def test_migrate_named_skill_populates_three_trees_and_symlink_and_registry(home
 
     registry = json.loads((home / ".agents" / "sync-skills" / "sources.json").read_text())
     assert registry == {
-        "widget": {"repo": "acme/skills", "path": "skills/widget", "ref": "abc123"}
+        "widget": {"repo": "acme/skills", "path": "skills/widget", "ref": "HEAD"}
     }
 
     lock = json.loads((home / ".agents" / ".skill-lock.json").read_text())
@@ -71,7 +71,7 @@ def test_migrate_derives_path_for_flat_layout(home):
     assert registry["tdd"] == {
         "repo": "mattpocock/skills",
         "path": "tdd",
-        "ref": "deadbeef",
+        "ref": "HEAD",
     }
 
 

@@ -63,8 +63,9 @@ def _migrate_one(name: str, entry: dict) -> None:
 
     repo = entry["source"]
     path = _path_from_skillpath(entry["skillPath"])
-    ref = entry.get("skillFolderHash", "HEAD")
-    core.registry_set(name, repo, path, ref)
+    # skillFolderHash is a content fingerprint (tree hash), not a fetchable
+    # git commit; pin to HEAD so fetch-all keeps working post-migrate.
+    core.registry_set(name, repo, path, "HEAD")
     core.audit_append("migrate", name)
     _drop_lock_entry(name)
 

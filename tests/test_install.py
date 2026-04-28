@@ -48,6 +48,28 @@ def test_install_with_explicit_ref(home, fake_upstream_repo):
         assert (base / layer / "SKILL.md").read_text() == "v2\n"
 
 
+def test_install_with_sha_ref(home, fake_upstream_repo):
+    repo_url = fake_upstream_repo("acme/widget", "skills/widget", {"SKILL.md": "v1\n"})
+    repo_dir = Path(repo_url.removeprefix("file://"))
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (repo_dir / "skills" / "widget" / "SKILL.md").write_text("v2\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo_dir, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "v2"], cwd=repo_dir, check=True)
+
+    rc = install.main(["widget", repo_url, "skills/widget", sha])
+    assert rc == 0
+
+    base = home / ".agents" / "sync-skills" / "widget"
+    for layer in ("active", "baseline", "upstream"):
+        assert (base / layer / "SKILL.md").read_text() == "v1\n"
+
+
 def test_install_refuses_existing_name(home, fake_upstream_repo, capsys):
     repo_url = fake_upstream_repo("acme/w", "skills/w", {"SKILL.md": "x"})
     install.main(["w", repo_url, "skills/w"])
