@@ -283,6 +283,13 @@ def _cmd_fetch_all(args: "argparse.Namespace") -> int:
     return 0
 
 
+def _cmd_wholesale(args: "argparse.Namespace") -> int:
+    p = paths_for(args.name)
+    copy_tree(p.upstream, p.active)
+    audit_append("wholesale", args.name)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -343,6 +350,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Clone each registered upstream and refresh upstream/; emit one line per skill.",
     )
     p_fetch.set_defaults(func=_cmd_fetch_all)
+
+    p_wholesale = sub.add_parser(
+        "wholesale",
+        help="Replace active/ with upstream/ and append a wholesale audit event.",
+    )
+    p_wholesale.add_argument("name")
+    p_wholesale.set_defaults(func=_cmd_wholesale)
 
     args = parser.parse_args(argv)
     return args.func(args)

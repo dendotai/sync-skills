@@ -23,6 +23,10 @@ python3 ~/.claude/skills/sync-skills/scripts/doctor.py [--yes]
 
 > **Clobber risk.** `npx skills` rewrites `~/.claude/skills/<name>` to point into `~/.agents/skills/<name>`, silently breaking the symlink into `active/`. The `/sync-skills` pre-flight catches this; `doctor` is the standalone equivalent.
 
+`sync_skills.py` (sibling to the five standalone scripts) is the inline-helper dispatcher used by `/sync-skills`; its subcommands stand in for what would otherwise be inline-Python blocks in this file.
+
+> **Allowlist.** A single entry — `Bash(python3 ~/.claude/skills/sync-skills/scripts/*.py *)` — covers the dispatcher and all five standalone scripts, silencing future `/sync-skills` permission prompts.
+
 ## Inspecting state
 
 ```bash
@@ -34,12 +38,6 @@ tail ~/.agents/sync-skills/history.log                    # audit
 ## /sync-skills
 
 The interactive review flow. When the user invokes `/sync-skills`, walk these steps in order. Throughout, prefer the bundled `sync_skills.py` dispatcher subcommands over hand-rolled `git`/`diff` so behaviour matches what the scripts do.
-
-Shorthand for the one remaining inline-Python call site (wholesale):
-
-```bash
-SS='import sys; sys.path.insert(0, "'"$HOME"'/.claude/skills/sync-skills/scripts"); import sync_skills as core'
-```
 
 ### 0. Pre-flight (run before fetching)
 
@@ -130,11 +128,7 @@ For each `upstream-changed` skill, in registry order:
 #### wholesale
 
 ```bash
-python3 -c "$SS
-p = core.paths_for('<name>')
-core.copy_tree(p.upstream, p.active)
-core.audit_append('wholesale', '<name>')
-"
+python3 ~/.claude/skills/sync-skills/scripts/sync_skills.py wholesale <name>
 python3 ~/.claude/skills/sync-skills/scripts/accept.py <name>
 ```
 
