@@ -8,7 +8,7 @@ import argparse
 import shutil
 import sys
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable
 
 import sync_skills as core
 
@@ -18,7 +18,7 @@ class Issue:
     kind: str
     skill: str
     summary: str
-    apply: Optional[Callable[[], None]]
+    apply: Callable[[], None] | None
 
 
 def _fix_symlink(name: str) -> Callable[[], None]:

@@ -85,6 +85,16 @@ def test_install_with_sha_ref(home, fake_upstream_repo):
     assert json.loads((base / "source.json").read_text())["commit"] == sha
 
 
+def test_install_from_repo_root_leaves_git_folder_out(home, fake_upstream_repo):
+    repo_url = fake_upstream_repo("acme/w", ".", {"SKILL.md": "v1\n"})
+
+    install.main(["w", repo_url, "."])
+
+    base = home / ".agents" / "sync-skills" / "skills" / "w"
+    for layer in ("current", "baseline"):
+        assert sorted(p.name for p in (base / layer).iterdir()) == ["SKILL.md"]
+
+
 def test_install_refuses_existing_name(home, fake_upstream_repo, capsys):
     repo_url = fake_upstream_repo("acme/w", "skills/w", {"SKILL.md": "x"})
     install.main(["w", repo_url, "skills/w"])
