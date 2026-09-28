@@ -1,37 +1,16 @@
 """Port skills installed via `npx skills` (vercel-labs/skills) into sync-skills.
 
-Reads ~/.agents/.skill-lock.json, copies ~/.agents/skills/<name>/ into all three
-trees, replaces the ~/.claude/skills/<name> symlink with one into active/,
-registers the entry, and removes it from the lock file."""
+Reads ~/.agents/.skill-lock.json, copies ~/.agents/skills/<name>/ into
+current/, takes baseline/ from the upstream commit whose folder matches the
+lock entry's hash, writes source.json, replaces the ~/.claude/skills/<name>
+symlink with one into current/, and removes the lock entry."""
 
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
-from pathlib import Path
 
 import sync_skills as core
-
-
-def _lock_path() -> Path:
-    return Path(os.environ["HOME"]) / ".agents" / ".skill-lock.json"
-
-
-def _npx_skill_dir(name: str) -> Path:
-    return Path(os.environ["HOME"]) / ".agents" / "skills" / name
-
-
-def _lock_load() -> dict:
-    p = _lock_path()
-    if not p.exists():
-        return {"version": 3, "skills": {}}
-    return json.loads(p.read_text())
-
-
-def _lock_save(data: dict) -> None:
-    _lock_path().write_text(json.dumps(data, indent=2) + "\n")
 
 
 def _path_from_skillpath(skill_path: str) -> str:
@@ -41,32 +20,33 @@ def _path_from_skillpath(skill_path: str) -> str:
 
 
 def _drop_lock_entry(name: str) -> None:
-    lock = _lock_load()
+    lock = core.lock_load()
     if lock.get("skills", {}).pop(name, None) is not None:
-        _lock_save(lock)
+        core.lock_save(lock)
 
 
 def _migrate_one(name: str, entry: dict) -> None:
-    if core.registry_get(name) is not None:
+    paths = core.paths_for(name)
+    if paths.dir.exists():
         _drop_lock_entry(name)
         return
 
-    src = _npx_skill_dir(name)
-    paths = core.paths_for(name)
-    for dst in (paths.active, paths.baseline, paths.upstream):
-        core.copy_tree(src, dst)
-
-    paths.symlink.parent.mkdir(parents=True, exist_ok=True)
-    if paths.symlink.is_symlink() or paths.symlink.exists():
-        paths.symlink.unlink()
-    paths.symlink.symlink_to(paths.active)
-
+    src = core.npx_skill_dir(name)
     repo = entry["source"]
     path = _path_from_skillpath(entry["skillPath"])
-    # skillFolderHash is a content fingerprint (tree hash), not a fetchable
-    # git commit; pin to HEAD so fetch-all keeps working post-migrate.
-    core.registry_set(name, repo, path, "HEAD")
-    core.audit_append("migrate", name)
+    core.copy_tree(src, paths.current)
+    # skillFolderHash is the git tree hash of the skill folder at install time.
+    with core.fetch_matching(repo, path, entry["skillFolderHash"]) as match:
+        if match is None:
+            # Upstream history no longer holds that tree (rewritten or moved).
+            core.copy_tree(src, paths.baseline)
+            commit = None
+        else:
+            core.copy_tree(match.dir, paths.baseline)
+            commit = match.commit
+    core.source_save(name, repo, path, commit)
+    core.link(name)
+    core.log_append(name, "migrate", f"{repo}@{commit}" if commit else f"{repo}, no matching commit")
     _drop_lock_entry(name)
 
 
@@ -75,8 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("name", nargs="?")
     args = parser.parse_args(argv)
 
-    lock = _lock_load()
-    skills = lock.get("skills", {})
+    skills = core.lock_load().get("skills", {})
 
     if args.name is not None:
         entry = skills.get(args.name)

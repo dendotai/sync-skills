@@ -1,5 +1,22 @@
+import shutil
+
 import install
 import relink
+
+
+def _current(home, name):
+    return home / ".agents" / "sync-skills" / "skills" / name / "current"
+
+
+def _history(home, name):
+    return home / ".agents" / "sync-skills" / "skills" / name / "history.log"
+
+
+def _install_ab(home, fake_upstream_repo):
+    repo_a = fake_upstream_repo("acme/a", "skills/a", {"SKILL.md": "a\n"})
+    repo_b = fake_upstream_repo("acme/b", "skills/b", {"SKILL.md": "b\n"})
+    install.main(["a", repo_a, "skills/a"])
+    install.main(["b", repo_b, "skills/b"])
 
 
 def test_relink_creates_missing_symlink(home, fake_upstream_repo):
@@ -8,26 +25,17 @@ def test_relink_creates_missing_symlink(home, fake_upstream_repo):
 
     link = home / ".claude" / "skills" / "w"
     link.unlink()
-    assert not link.exists()
 
     rc = relink.main([])
     assert rc == 0
 
-    target = home / ".agents" / "sync-skills" / "w" / "active"
     assert link.is_symlink()
-    assert link.resolve() == target.resolve()
+    assert link.resolve() == _current(home, "w").resolve()
 
 
-def test_relink_skips_skill_with_missing_active(home, fake_upstream_repo, capsys):
-    import shutil
-
-    repo_a = fake_upstream_repo("acme/a", "skills/a", {"SKILL.md": "a\n"})
-    repo_b = fake_upstream_repo("acme/b", "skills/b", {"SKILL.md": "b\n"})
-    install.main(["a", repo_a, "skills/a"])
-    install.main(["b", repo_b, "skills/b"])
-
-    sync_root = home / ".agents" / "sync-skills"
-    shutil.rmtree(sync_root / "a" / "active")
+def test_relink_skips_skill_with_missing_current(home, fake_upstream_repo, capsys):
+    _install_ab(home, fake_upstream_repo)
+    shutil.rmtree(_current(home, "a"))
 
     skills_dir = home / ".claude" / "skills"
     (skills_dir / "a").unlink()
@@ -37,17 +45,12 @@ def test_relink_skips_skill_with_missing_active(home, fake_upstream_repo, capsys
     assert rc != 0
 
     assert not (skills_dir / "a").exists()
-    assert (skills_dir / "b").resolve() == (sync_root / "b" / "active").resolve()
-
-    err = capsys.readouterr().err
-    assert "a" in err
+    assert (skills_dir / "b").resolve() == _current(home, "b").resolve()
+    assert "a" in capsys.readouterr().err
 
 
-def test_relink_appends_audit_event_per_relinked_skill(home, fake_upstream_repo):
-    repo_a = fake_upstream_repo("acme/a", "skills/a", {"SKILL.md": "a\n"})
-    repo_b = fake_upstream_repo("acme/b", "skills/b", {"SKILL.md": "b\n"})
-    install.main(["a", repo_a, "skills/a"])
-    install.main(["b", repo_b, "skills/b"])
+def test_relink_appends_log_line_per_relinked_skill(home, fake_upstream_repo):
+    _install_ab(home, fake_upstream_repo)
 
     skills_dir = home / ".claude" / "skills"
     (skills_dir / "a").unlink()
@@ -55,25 +58,19 @@ def test_relink_appends_audit_event_per_relinked_skill(home, fake_upstream_repo)
 
     relink.main([])
 
-    history = (home / ".agents" / "sync-skills" / "history.log").read_text().splitlines()
-    relink_lines = [line for line in history if "\trelink\t" in line]
-    assert len(relink_lines) == 2
-    assert any(line.endswith("\ta") for line in relink_lines)
-    assert any(line.endswith("\tb") for line in relink_lines)
+    for name in ("a", "b"):
+        actions = [line.split("\t")[1] for line in _history(home, name).read_text().splitlines()]
+        assert actions == ["install", "relink"]
 
 
-def test_relink_empty_registry_is_clean_exit(home):
+def test_relink_with_no_skills_is_clean_exit(home):
     rc = relink.main([])
     assert rc == 0
-    history = home / ".agents" / "sync-skills" / "history.log"
-    assert not history.exists()
+    assert not (home / ".agents" / "sync-skills").exists()
 
 
 def test_relink_refuses_to_overwrite_non_symlink(home, fake_upstream_repo, capsys):
-    repo_a = fake_upstream_repo("acme/a", "skills/a", {"SKILL.md": "a\n"})
-    repo_b = fake_upstream_repo("acme/b", "skills/b", {"SKILL.md": "b\n"})
-    install.main(["a", repo_a, "skills/a"])
-    install.main(["b", repo_b, "skills/b"])
+    _install_ab(home, fake_upstream_repo)
 
     skills_dir = home / ".claude" / "skills"
     (skills_dir / "a").unlink()
@@ -85,25 +82,20 @@ def test_relink_refuses_to_overwrite_non_symlink(home, fake_upstream_repo, capsy
 
     assert (skills_dir / "a").is_file() and not (skills_dir / "a").is_symlink()
     assert (skills_dir / "a").read_text() == "hand-rolled\n"
-
-    sync_root = home / ".agents" / "sync-skills"
-    assert (skills_dir / "b").resolve() == (sync_root / "b" / "active").resolve()
-
-    err = capsys.readouterr().err
-    assert "a" in err
+    assert (skills_dir / "b").resolve() == _current(home, "b").resolve()
+    assert "a" in capsys.readouterr().err
 
 
 def test_relink_is_noop_when_symlink_already_correct(home, fake_upstream_repo):
     repo_url = fake_upstream_repo("acme/w", "skills/w", {"SKILL.md": "v1\n"})
     install.main(["w", repo_url, "skills/w"])
 
-    history = home / ".agents" / "sync-skills" / "history.log"
-    before = history.read_text()
+    before = _history(home, "w").read_text()
 
     rc = relink.main([])
     assert rc == 0
 
-    assert history.read_text() == before
+    assert _history(home, "w").read_text() == before
 
 
 def test_relink_replaces_wrong_target(home, fake_upstream_repo):
@@ -119,15 +111,11 @@ def test_relink_replaces_wrong_target(home, fake_upstream_repo):
     rc = relink.main([])
     assert rc == 0
 
-    target = home / ".agents" / "sync-skills" / "w" / "active"
-    assert link.resolve() == target.resolve()
+    assert link.resolve() == _current(home, "w").resolve()
 
 
 def test_relink_handles_multiple_skills(home, fake_upstream_repo):
-    repo_a = fake_upstream_repo("acme/a", "skills/a", {"SKILL.md": "a\n"})
-    repo_b = fake_upstream_repo("acme/b", "skills/b", {"SKILL.md": "b\n"})
-    install.main(["a", repo_a, "skills/a"])
-    install.main(["b", repo_b, "skills/b"])
+    _install_ab(home, fake_upstream_repo)
 
     skills_dir = home / ".claude" / "skills"
     (skills_dir / "a").unlink()
@@ -136,6 +124,5 @@ def test_relink_handles_multiple_skills(home, fake_upstream_repo):
     rc = relink.main([])
     assert rc == 0
 
-    sync_root = home / ".agents" / "sync-skills"
-    assert (skills_dir / "a").resolve() == (sync_root / "a" / "active").resolve()
-    assert (skills_dir / "b").resolve() == (sync_root / "b" / "active").resolve()
+    assert (skills_dir / "a").resolve() == _current(home, "a").resolve()
+    assert (skills_dir / "b").resolve() == _current(home, "b").resolve()

@@ -18,4 +18,4 @@ Examples:
 
 ## Architecture
 
-Self-contained scripts (`scripts/install.py`, plus `accept.py`/`migrate.py`/`relink.py`/`doctor.py` as they land) sharing one `scripts/core.py`. Trivial ops (list, fetch, diff, remove) are inline `Bash` in `SKILL.md`. See PRD #1 for the full rationale.
+Self-contained scripts (`install.py`, `migrate.py`, `relink.py`, `doctor.py`) sharing one `scripts/sync_skills.py`, which is also the helper dispatcher `SKILL.md` calls. The layout is in #53.
