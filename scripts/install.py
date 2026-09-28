@@ -1,5 +1,5 @@
-"""Register a skill, seed active/baseline/upstream from upstream, create the
-~/.claude/skills/<name> symlink, append an audit event."""
+"""Install a skill from upstream: seed current/ and baseline/, write
+source.json, create the ~/.claude/skills/<name> symlink, start history.log."""
 
 from __future__ import annotations
 
@@ -17,22 +17,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("ref", nargs="?", default="HEAD")
     args = parser.parse_args(argv)
 
-    if core.registry_get(args.name) is not None:
-        print(f"error: {args.name} already registered", file=sys.stderr)
+    paths = core.paths_for(args.name)
+    if paths.dir.exists():
+        print(f"error: {args.name} already installed", file=sys.stderr)
         return 2
 
-    paths = core.paths_for(args.name)
     with core.fetch(args.repo, args.path, args.ref) as src:
-        for dst in (paths.active, paths.baseline, paths.upstream):
-            core.copy_tree(src, dst)
-
-    paths.symlink.parent.mkdir(parents=True, exist_ok=True)
-    if paths.symlink.is_symlink() or paths.symlink.exists():
-        paths.symlink.unlink()
-    paths.symlink.symlink_to(paths.active)
-
-    core.registry_set(args.name, args.repo, args.path, args.ref)
-    core.audit_append("install", args.name)
+        core.copy_tree(src.dir, paths.current)
+        core.copy_tree(src.dir, paths.baseline)
+    core.source_save(args.name, args.repo, args.path, src.commit)
+    core.link(args.name)
+    core.log_append(args.name, "install", f"{args.repo}@{src.commit}")
     return 0
 
 

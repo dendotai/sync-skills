@@ -16,24 +16,28 @@ def _run(*args, **kwargs):
     )
 
 
-def test_registry_list_emits_empty_object_when_no_registry(home):
-    result = _run("registry-list")
+def _skill_dir(home, name):
+    return home / ".agents" / "sync-skills" / "skills" / name
+
+
+def _seed_managed(home, name):
+    (_skill_dir(home, name) / "current").mkdir(parents=True)
+
+
+def test_list_emits_nothing_when_no_skills(home):
+    result = _run("list")
     assert result.returncode == 0
-    assert json.loads(result.stdout) == {}
+    assert result.stdout == ""
 
 
-def test_registry_list_emits_registry_contents(home):
-    registry = home / ".agents" / "sync-skills" / "sources.json"
-    registry.parent.mkdir(parents=True)
-    registry.write_text(
-        json.dumps({"widget": {"repo": "acme/skills", "path": "widget", "ref": "HEAD"}})
-    )
+def test_list_emits_sorted_skill_folder_names(home):
+    _seed_managed(home, "zebra")
+    _seed_managed(home, "alpha")
+    (home / ".agents" / "sync-skills" / "skills" / "notes.txt").write_text("x\n")
 
-    result = _run("registry-list")
+    result = _run("list")
     assert result.returncode == 0
-    assert json.loads(result.stdout) == {
-        "widget": {"repo": "acme/skills", "path": "widget", "ref": "HEAD"}
-    }
+    assert result.stdout.splitlines() == ["alpha", "zebra"]
 
 
 def _seed_lock(home, name):
@@ -75,20 +79,12 @@ def test_migration_candidates_emits_nothing_when_none(home):
     assert result.stdout == ""
 
 
-def _seed_registry(home, name):
-    registry = home / ".agents" / "sync-skills" / "sources.json"
-    data = json.loads(registry.read_text()) if registry.exists() else {}
-    data[name] = {"repo": "acme/skills", "path": name, "ref": "HEAD"}
-    registry.parent.mkdir(parents=True, exist_ok=True)
-    registry.write_text(json.dumps(data))
-
-
-def test_clobbered_list_emits_only_registered_clobbered_names(home):
-    _seed_registry(home, "alpha")
-    _seed_registry(home, "beta")
+def test_clobbered_list_emits_only_managed_clobbered_names(home):
+    _seed_managed(home, "alpha")
+    _seed_managed(home, "beta")
     _make_clobber(home, "alpha")
-    # beta is registered but not clobbered → excluded.
-    # gamma is clobbered but unregistered → also excluded.
+    # beta is managed but not clobbered → excluded.
+    # gamma is clobbered but not managed → also excluded.
     _make_clobber(home, "gamma")
 
     result = _run("clobbered-list")
@@ -96,16 +92,16 @@ def test_clobbered_list_emits_only_registered_clobbered_names(home):
     assert result.stdout.splitlines() == ["alpha"]
 
 
-def test_clobbered_list_emits_nothing_when_no_registry(home):
+def test_clobbered_list_emits_nothing_when_no_skills(home):
     result = _run("clobbered-list")
     assert result.returncode == 0
     assert result.stdout == ""
 
 
-def _seed_active_skill_md(home, name, content):
-    active = home / ".agents" / "sync-skills" / name / "active"
-    active.mkdir(parents=True, exist_ok=True)
-    (active / "SKILL.md").write_text(content)
+def _seed_current_skill_md(home, name, content):
+    current = _skill_dir(home, name) / "current"
+    current.mkdir(parents=True, exist_ok=True)
+    (current / "SKILL.md").write_text(content)
 
 
 def _seed_npx_skill_md(home, name, content):
@@ -114,80 +110,35 @@ def _seed_npx_skill_md(home, name, content):
     (npx / "SKILL.md").write_text(content)
 
 
-def test_stranded_edit_exits_zero_when_npx_diverges_from_active(home):
-    _seed_active_skill_md(home, "alpha", "v1\n")
+def test_stranded_edit_exits_zero_when_npx_diverges_from_current(home):
+    _seed_current_skill_md(home, "alpha", "v1\n")
     _seed_npx_skill_md(home, "alpha", "HAND-EDITED\n")
 
     result = _run("stranded-edit", "alpha")
     assert result.returncode == 0
 
 
-def test_stranded_edit_exits_one_when_npx_matches_active(home):
-    _seed_active_skill_md(home, "alpha", "v1\n")
+def test_stranded_edit_exits_one_when_npx_matches_current(home):
+    _seed_current_skill_md(home, "alpha", "v1\n")
     _seed_npx_skill_md(home, "alpha", "v1\n")
 
     result = _run("stranded-edit", "alpha")
     assert result.returncode == 1
 
 
-def test_audit_subcommand_appends_history_log(home):
-    result = _run("audit", "cherry-pick", "widget")
+def test_audit_subcommand_appends_to_the_skill_history_log(home):
+    result = _run("audit", "relink", "widget")
     assert result.returncode == 0
 
-    log = home / ".agents" / "sync-skills" / "history.log"
-    line = log.read_text().strip().splitlines()[-1]
-    ts, action, skill = line.split("\t")
-    assert action == "cherry-pick"
-    assert skill == "widget"
+    log = _skill_dir(home, "widget") / "history.log"
+    ts, action = log.read_text().strip().splitlines()[-1].split("\t")
+    assert action == "relink"
 
 
 def test_help_lists_audit_subcommand():
     result = _run("--help")
     assert result.returncode == 0
     assert "audit" in result.stdout
-
-
-def test_fetch_all_refreshes_upstream_tree_and_emits_names(home, fake_upstream_repo):
-    repo = fake_upstream_repo("acme/skills", "skills/widget", {"SKILL.md": "v2\n"})
-    registry = home / ".agents" / "sync-skills" / "sources.json"
-    registry.parent.mkdir(parents=True)
-    registry.write_text(
-        json.dumps({"widget": {"repo": repo, "path": "skills/widget", "ref": "HEAD"}})
-    )
-    upstream = home / ".agents" / "sync-skills" / "widget" / "upstream"
-    upstream.mkdir(parents=True)
-    (upstream / "STALE.md").write_text("stale\n")
-
-    result = _run("fetch-all")
-    assert result.returncode == 0
-    assert result.stdout.splitlines() == ["widget"]
-    assert (upstream / "SKILL.md").read_text() == "v2\n"
-    assert not (upstream / "STALE.md").exists()
-
-
-def _seed_layered_skill(home, name, baseline_content, upstream_content):
-    base = home / ".agents" / "sync-skills" / name
-    (base / "baseline").mkdir(parents=True)
-    (base / "upstream").mkdir(parents=True)
-    (base / "baseline" / "SKILL.md").write_text(baseline_content)
-    (base / "upstream" / "SKILL.md").write_text(upstream_content)
-
-
-def test_changed_list_emits_only_skills_whose_baseline_differs_from_upstream(home):
-    _seed_registry(home, "alpha")
-    _seed_registry(home, "beta")
-    _seed_layered_skill(home, "alpha", "v1\n", "v2\n")
-    _seed_layered_skill(home, "beta", "v1\n", "v1\n")
-
-    result = _run("changed-list")
-    assert result.returncode == 0
-    assert result.stdout.splitlines() == ["alpha"]
-
-
-def test_changed_list_emits_nothing_when_no_registry(home):
-    result = _run("changed-list")
-    assert result.returncode == 0
-    assert result.stdout == ""
 
 
 def test_parse_hunks_emits_json_list_from_stdin_diff():
@@ -211,36 +162,12 @@ def test_parse_hunks_emits_json_list_from_stdin_diff():
     ]
 
 
-def test_backup_active_creates_bak_and_prints_path(home):
-    _seed_active_skill_md(home, "widget", "v1\n")
+def test_backup_current_creates_bak_and_prints_path(home):
+    _seed_current_skill_md(home, "widget", "v1\n")
 
-    result = _run("backup-active", "widget")
+    result = _run("backup-current", "widget")
     assert result.returncode == 0
 
-    bak = home / ".agents" / "sync-skills" / "widget" / "active" / "SKILL.md.bak"
-    assert bak.is_file()
+    bak = _skill_dir(home, "widget") / "current" / "SKILL.md.bak"
     assert bak.read_text() == "v1\n"
     assert result.stdout.strip() == str(bak)
-
-
-def test_wholesale_replaces_active_with_upstream_and_audits(home):
-    base = home / ".agents" / "sync-skills" / "widget"
-    (base / "active").mkdir(parents=True)
-    (base / "upstream").mkdir(parents=True)
-    (base / "active" / "SKILL.md").write_text("old\n")
-    (base / "active" / "stale.md").write_text("gone\n")
-    (base / "upstream" / "SKILL.md").write_text("new\n")
-    (base / "upstream" / "fresh.md").write_text("added\n")
-
-    result = _run("wholesale", "widget")
-    assert result.returncode == 0
-
-    assert (base / "active" / "SKILL.md").read_text() == "new\n"
-    assert (base / "active" / "fresh.md").read_text() == "added\n"
-    assert not (base / "active" / "stale.md").exists()
-
-    log = home / ".agents" / "sync-skills" / "history.log"
-    line = log.read_text().strip().splitlines()[-1]
-    _, action, skill = line.split("\t")
-    assert action == "wholesale"
-    assert skill == "widget"

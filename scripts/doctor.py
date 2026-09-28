@@ -1,29 +1,16 @@
 """Diagnose state drift across sync-skills, vercel-labs/skills, and the Claude
 symlink directory. Each diagnosis is independently callable; a fix is attached
-to every Issue so callers can apply selectively."""
+to every Issue that has one, so callers can apply selectively."""
 
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import shutil
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
 
 import sync_skills as core
-
-
-def _npx_dir(name: str) -> Path:
-    return Path(os.environ["HOME"]) / ".agents" / "skills" / name
-
-
-def _lock_save(data: dict) -> None:
-    (Path(os.environ["HOME"]) / ".agents" / ".skill-lock.json").write_text(
-        json.dumps(data, indent=2) + "\n"
-    )
 
 
 @dataclass
@@ -31,38 +18,34 @@ class Issue:
     kind: str
     skill: str
     summary: str
-    apply: Callable[[], None]
+    apply: Callable[[], None] | None
 
 
 def _fix_symlink(name: str) -> Callable[[], None]:
     def apply() -> None:
-        paths = core.paths_for(name)
-        paths.symlink.parent.mkdir(parents=True, exist_ok=True)
-        if paths.symlink.is_symlink() or paths.symlink.exists():
-            paths.symlink.unlink()
-        paths.symlink.symlink_to(paths.active)
-        core.audit_append("doctor-fix", name)
+        core.link(name)
+        core.log_append(name, "doctor-fix", "symlink")
 
     return apply
 
 
 def _import_stranded_edit(name: str) -> Callable[[], None]:
     def apply() -> None:
-        src = _npx_dir(name) / "SKILL.md"
-        dst = core.paths_for(name).active / "SKILL.md"
+        src = core.npx_skill_dir(name) / "SKILL.md"
+        dst = core.paths_for(name).current / "SKILL.md"
         shutil.copy2(src, dst)
-        core.audit_append("doctor-fix", name)
+        core.log_append(name, "doctor-fix", "stranded-edit")
 
     return apply
 
 
 def _check_symlinks() -> list[Issue]:
     issues: list[Issue] = []
-    for name in core.registry_load():
+    for name in core.managed():
         paths = core.paths_for(name)
-        if not paths.active.is_dir():
+        if not paths.current.is_dir():
             continue
-        if paths.symlink.is_symlink() and paths.symlink.resolve() == paths.active.resolve():
+        if paths.symlink.is_symlink() and paths.symlink.resolve() == paths.current.resolve():
             continue
         if paths.symlink.exists() and not paths.symlink.is_symlink():
             continue
@@ -81,7 +64,7 @@ def _check_symlinks() -> list[Issue]:
                     Issue(
                         kind="stranded-edit",
                         skill=name,
-                        summary=f"~/.agents/skills/{name}/SKILL.md has edits not in active/",
+                        summary=f"~/.agents/skills/{name}/SKILL.md has edits not in current/",
                         apply=_import_stranded_edit(name),
                     )
                 )
@@ -97,67 +80,12 @@ def _check_symlinks() -> list[Issue]:
     return issues
 
 
-def _drop_registry_entry(name: str) -> Callable[[], None]:
-    def apply() -> None:
-        data = core.registry_load()
-        data.pop(name, None)
-        core.registry_save(data)
-        core.audit_append("doctor-fix", name)
-
-    return apply
-
-
-def _check_registry_orphans() -> list[Issue]:
-    issues: list[Issue] = []
-    for name in core.registry_load():
-        if not (core.root() / name).is_dir():
-            issues.append(
-                Issue(
-                    kind="registry-orphan",
-                    skill=name,
-                    summary=f"sources.json has {name} but ~/.agents/sync-skills/{name}/ is missing",
-                    apply=_drop_registry_entry(name),
-                )
-            )
-    return issues
-
-
-def _delete_folder(name: str) -> Callable[[], None]:
-    def apply() -> None:
-        shutil.rmtree(core.root() / name)
-        core.audit_append("doctor-fix", name)
-
-    return apply
-
-
-def _check_folder_orphans() -> list[Issue]:
-    issues: list[Issue] = []
-    sync = core.root()
-    if not sync.is_dir():
-        return issues
-    registered = set(core.registry_load().keys())
-    for entry in sorted(sync.iterdir()):
-        if not entry.is_dir():
-            continue
-        if entry.name in registered:
-            continue
-        issues.append(
-            Issue(
-                kind="folder-orphan",
-                skill=entry.name,
-                summary=f"~/.agents/sync-skills/{entry.name}/ exists but is not in sources.json",
-                apply=_delete_folder(entry.name),
-            )
-        )
-    return issues
-
-
 def _drop_lock_entry(name: str) -> Callable[[], None]:
     def apply() -> None:
         lock = core.lock_load()
         if lock.get("skills", {}).pop(name, None) is not None:
-            _lock_save(lock)
-        core.audit_append("doctor-fix", name)
+            core.lock_save(lock)
+        core.log_append(name, "doctor-fix", "double-managed")
 
     return apply
 
@@ -165,61 +93,56 @@ def _drop_lock_entry(name: str) -> Callable[[], None]:
 def _check_double_managed() -> list[Issue]:
     issues: list[Issue] = []
     locked = set(core.lock_load().get("skills", {}).keys())
-    for name in core.registry_load():
+    for name in core.managed():
         if name in locked:
             issues.append(
                 Issue(
                     kind="double-managed",
                     skill=name,
-                    summary=f"{name} is in both sources.json and .skill-lock.json",
+                    summary=f"{name} is managed here and also listed in .skill-lock.json",
                     apply=_drop_lock_entry(name),
                 )
             )
     return issues
 
 
-def _refetch_missing_layers(name: str, missing: list[str]) -> Callable[[], None]:
+def _refetch_baseline(name: str, source: dict) -> Callable[[], None]:
     def apply() -> None:
-        entry = core.registry_get(name) or {}
-        paths = core.paths_for(name)
-        with core.fetch(entry["repo"], entry["path"], entry.get("ref", "HEAD")) as src:
-            for layer in missing:
-                core.copy_tree(src, getattr(paths, layer))
-        core.audit_append("doctor-fix", name)
+        with core.fetch(source["repo"], source["path"], source["commit"]) as src:
+            core.copy_tree(src.dir, core.paths_for(name).baseline)
+        core.log_append(name, "doctor-fix", f"baseline refetched at {source['commit']}")
 
     return apply
 
 
 def _check_missing_layers() -> list[Issue]:
     issues: list[Issue] = []
-    for name in core.registry_load():
+    for name in core.managed():
         paths = core.paths_for(name)
-        if not (core.root() / name).is_dir():
-            continue
-        missing = [
-            layer for layer in ("active", "baseline", "upstream")
-            if not getattr(paths, layer).is_dir()
-        ]
-        if missing:
+        if not paths.current.is_dir():
             issues.append(
                 Issue(
-                    kind="missing-layers",
+                    kind="missing-layer",
                     skill=name,
-                    summary=f"{name} is missing layer(s): {', '.join(missing)}",
-                    apply=_refetch_missing_layers(name, missing),
+                    summary=f"{name} is missing current/",
+                    apply=None,
+                )
+            )
+        if not paths.baseline.is_dir():
+            source = core.source_load(name) if paths.source.is_file() else {}
+            issues.append(
+                Issue(
+                    kind="missing-layer",
+                    skill=name,
+                    summary=f"{name} is missing baseline/",
+                    apply=_refetch_baseline(name, source) if source.get("commit") else None,
                 )
             )
     return issues
 
 
 def diagnose() -> list[Issue]:
-    return (
-        _check_symlinks()
-        + _check_registry_orphans()
-        + _check_folder_orphans()
-        + _check_double_managed()
-        + _check_missing_layers()
-    )
+    return _check_symlinks() + _check_double_managed() + _check_missing_layers()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -234,13 +157,17 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"found {len(issues)} issue(s):")
     for i in issues:
-        print(f"  [{i.kind}] {i.summary}")
+        suffix = "" if i.apply else " (no fix)"
+        print(f"  [{i.kind}] {i.summary}{suffix}")
 
     if not args.yes:
         print("\nre-run with --yes to apply every proposed fix.")
         return 0
 
     for i in issues:
+        if i.apply is None:
+            print(f"no fix: [{i.kind}] {i.skill}")
+            continue
         i.apply()
         print(f"fixed: [{i.kind}] {i.skill}")
     return 0

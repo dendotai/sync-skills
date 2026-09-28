@@ -37,7 +37,7 @@ def test_is_clobbered_true_when_symlink_points_into_npx_dir(home, fake_upstream_
     assert sync_skills.is_clobbered("w") is True
 
 
-def test_is_clobbered_false_when_symlink_points_into_active(home, fake_upstream_repo):
+def test_is_clobbered_false_when_symlink_points_into_current(home, fake_upstream_repo):
     _install(home, fake_upstream_repo)
     assert sync_skills.is_clobbered("w") is False
 
@@ -54,7 +54,7 @@ def test_has_stranded_edit_true_when_npx_skill_md_diverges(home, fake_upstream_r
     assert sync_skills.has_stranded_edit("w") is True
 
 
-def test_has_stranded_edit_false_when_npx_matches_active(home, fake_upstream_repo):
+def test_has_stranded_edit_false_when_npx_matches_current(home, fake_upstream_repo):
     _install(home, fake_upstream_repo, content="v\n")
     _make_clobber(home, npx_content="v\n")
     assert sync_skills.has_stranded_edit("w") is False
@@ -75,14 +75,14 @@ def test_migration_candidates_lists_locked_skill_with_npx_symlink(home):
     assert sync_skills.migration_candidates() == ["foo"]
 
 
-def test_migration_candidates_skips_already_registered_skills(home, fake_upstream_repo):
+def test_migration_candidates_skips_managed_skills(home, fake_upstream_repo):
     _install(home, fake_upstream_repo, name="w")
     _seed_lock(home, "w")
     # 'w' is double-managed, not a migration candidate (doctor handles that case).
     assert "w" not in sync_skills.migration_candidates()
 
 
-def test_migration_candidates_skips_locked_skill_without_active_npx_symlink(home):
+def test_migration_candidates_skips_locked_skill_without_npx_symlink(home):
     _seed_lock(home, "bar")
     # No symlink at ~/.claude/skills/bar — nothing to migrate.
     assert sync_skills.migration_candidates() == []
